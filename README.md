@@ -1,4 +1,6 @@
 # GA4 User Simulator
+![License](https://img.shields.io/github/license/paolobietolini/send-ga4-users)
+![Python](https://img.shields.io/badge/python-≥3.11-blue)
 
 Simulate GA4 users for testing purposes using a hybrid approach that combines browser automation with the Measurement Protocol.
 

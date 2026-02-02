@@ -108,6 +108,39 @@ MAX_PAGES_PER_SESSION=5
 - `page_view` - Page navigation (multiple per session in hybrid mode)
 - `user_engagement` - Time spent on site
 
+## Troubleshooting
+
+### DNS Errors with High User Counts
+
+If you see errors like `[Errno -3] Temporary failure in name resolution` when simulating many users (500+), your DNS resolver is being overwhelmed by concurrent connections.
+
+**Solution**: Reduce concurrency with the `--concurrent` flag:
+
+```bash
+# Instead of this (may fail with DNS errors):
+uv run python main.py --users 1000 --mode mp
+
+# Use this (works reliably):
+uv run python main.py --users 1000 --mode mp --concurrent 10
+```
+
+**Recommended concurrency settings:**
+- `--concurrent 10` - Safe for most systems (1000 users in ~25s)
+- `--concurrent 20` - Faster, but may cause issues on some networks
+- `--concurrent 50` - Only if you have a robust network/DNS setup
+
+### Running Large Batches
+
+For very large simulations, consider running in batches:
+
+```bash
+# Run 10 batches of 100 users each
+for i in {1..10}; do
+  uv run python main.py --users 100 --mode mp --concurrent 10
+  sleep 5
+done
+```
+
 ## License
 
 MIT

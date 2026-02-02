@@ -1,0 +1,14 @@
+[project]
+name = "send-ga4-users"
+version = "1.0.0"
+description = "Simulate GA4 users for testing using hybrid browser + Measurement Protocol approach"
+requires-python = ">=3.11"
+dependencies = [
+    "playwright>=1.40.0",
+    "httpx>=0.25.0",
+    "python-dotenv>=1.0.0",
+    "faker>=22.0.0",
+]
+
+[tool.uv]
+package = false

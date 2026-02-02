@@ -71,10 +71,12 @@ class UserSimulator:
 
         self._stats = SimulationStats(start_time=time.time())
 
-        # Browser modes need lower concurrency to avoid overwhelming the site
+        # Cap concurrency to avoid overwhelming DNS/network
         max_concurrent = self.config.simulation.max_concurrent_users
         if self.mode in (SimulationMode.BROWSER_ONLY, SimulationMode.HYBRID):
             max_concurrent = min(max_concurrent, 10)  # Cap browser concurrency
+        else:
+            max_concurrent = min(max_concurrent, 20)  # Cap MP concurrency
 
         self._semaphore = asyncio.Semaphore(max_concurrent)
 

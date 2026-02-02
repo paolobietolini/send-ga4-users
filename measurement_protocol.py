@@ -1,5 +1,6 @@
 """GA4 Measurement Protocol client for sending events."""
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -47,7 +48,9 @@ class MeasurementProtocolClient:
         return self.config.debug_endpoint if self.debug else self.config.mp_endpoint
 
     async def __aenter__(self) -> "MeasurementProtocolClient":
-        self._client = httpx.AsyncClient(timeout=30.0)
+        # Limit connections to avoid overwhelming DNS/network
+        limits = httpx.Limits(max_connections=20, max_keepalive_connections=10)
+        self._client = httpx.AsyncClient(timeout=30.0, limits=limits)
         return self
 
     async def __aexit__(self, *args) -> None:
@@ -59,28 +62,39 @@ class MeasurementProtocolClient:
         return await self.send_events(user, [event])
 
     async def send_events(
-        self, user: GA4User, events: list[GA4Event]
+        self, user: GA4User, events: list[GA4Event], retries: int = 3
     ) -> dict[str, Any]:
-        """Send multiple events to GA4."""
+        """Send multiple events to GA4 with retry logic."""
         if not self._client:
             raise RuntimeError("Client not initialized. Use async context manager.")
 
         # Build payload
         payload = self._build_payload(user, events)
 
-        # Send request
-        response = await self._client.post(self.endpoint, json=payload)
+        last_error = None
+        for attempt in range(retries):
+            try:
+                # Send request
+                response = await self._client.post(self.endpoint, json=payload)
 
-        result = {
-            "status_code": response.status_code,
-            "success": response.status_code == 204 or response.status_code == 200,
-        }
+                result = {
+                    "status_code": response.status_code,
+                    "success": response.status_code == 204 or response.status_code == 200,
+                }
 
-        # Debug endpoint returns validation info
-        if self.debug and response.content:
-            result["debug_response"] = response.json()
+                # Debug endpoint returns validation info
+                if self.debug and response.content:
+                    result["debug_response"] = response.json()
 
-        return result
+                return result
+
+            except (httpx.ConnectError, httpx.TimeoutException, OSError) as e:
+                last_error = e
+                if attempt < retries - 1:
+                    # Exponential backoff: 0.5s, 1s, 2s
+                    await asyncio.sleep(0.5 * (2 ** attempt))
+
+        raise last_error
 
     def _build_payload(
         self, user: GA4User, events: list[GA4Event]

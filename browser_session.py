@@ -41,7 +41,9 @@ class BrowserSessionManager:
         if self._playwright:
             await self._playwright.stop()
 
-    async def create_session(self, timeout_ms: int = 30000) -> SessionData:
+    async def create_session(
+        self, timeout_ms: int = 30000, retries: int = 3
+    ) -> SessionData:
         """
         Create a new browser session, visit the target URL,
         and extract the GA4 client_id from cookies.
@@ -49,30 +51,43 @@ class BrowserSessionManager:
         if not self._browser:
             raise RuntimeError("Browser not initialized. Use async context manager.")
 
-        context = await self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent=self._get_random_user_agent(),
-        )
+        last_error = None
+        for attempt in range(retries):
+            context = await self._browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent=self._get_random_user_agent(),
+            )
 
-        try:
-            page = await context.new_page()
+            try:
+                page = await context.new_page()
 
-            # Navigate to target URL
-            await page.goto(self.config.target_url, wait_until="networkidle")
+                # Navigate to target URL (domcontentloaded is faster and more reliable)
+                await page.goto(
+                    self.config.target_url,
+                    wait_until="domcontentloaded",
+                    timeout=timeout_ms,
+                )
 
-            # Wait a bit for GA4 to initialize
-            await asyncio.sleep(2)
+                # Wait a bit for GA4 to initialize
+                await asyncio.sleep(1.5)
 
-            # Extract session data
-            session_data = await self._extract_session_data(context, page)
+                # Extract session data
+                session_data = await self._extract_session_data(context, page)
 
-            return session_data
+                return session_data
 
-        finally:
-            await context.close()
+            except Exception as e:
+                last_error = e
+                # Exponential backoff before retry
+                if attempt < retries - 1:
+                    await asyncio.sleep(0.5 * (2 ** attempt))
+            finally:
+                await context.close()
+
+        raise last_error
 
     async def create_session_with_engagement(
-        self, engagement_time_ms: int = 5000
+        self, engagement_time_ms: int = 5000, retries: int = 3
     ) -> SessionData:
         """
         Create a session and simulate user engagement.
@@ -81,27 +96,40 @@ class BrowserSessionManager:
         if not self._browser:
             raise RuntimeError("Browser not initialized. Use async context manager.")
 
-        context = await self._browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent=self._get_random_user_agent(),
-        )
+        last_error = None
+        for attempt in range(retries):
+            context = await self._browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent=self._get_random_user_agent(),
+            )
 
-        try:
-            page = await context.new_page()
+            try:
+                page = await context.new_page()
 
-            # Navigate to target URL
-            await page.goto(self.config.target_url, wait_until="networkidle")
+                # Navigate to target URL (domcontentloaded is faster and more reliable)
+                await page.goto(
+                    self.config.target_url,
+                    wait_until="domcontentloaded",
+                    timeout=30000,
+                )
 
-            # Simulate engagement (scroll, wait)
-            await self._simulate_engagement(page, engagement_time_ms)
+                # Simulate engagement (scroll, wait)
+                await self._simulate_engagement(page, engagement_time_ms)
 
-            # Extract session data
-            session_data = await self._extract_session_data(context, page)
+                # Extract session data
+                session_data = await self._extract_session_data(context, page)
 
-            return session_data
+                return session_data
 
-        finally:
-            await context.close()
+            except Exception as e:
+                last_error = e
+                # Exponential backoff before retry
+                if attempt < retries - 1:
+                    await asyncio.sleep(0.5 * (2 ** attempt))
+            finally:
+                await context.close()
+
+        raise last_error
 
     async def _extract_session_data(
         self, context: BrowserContext, page: Page

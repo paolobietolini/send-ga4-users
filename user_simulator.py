@@ -70,9 +70,13 @@ class UserSimulator:
         num_users = min(num_users, self.config.simulation.max_daily_users)
 
         self._stats = SimulationStats(start_time=time.time())
-        self._semaphore = asyncio.Semaphore(
-            self.config.simulation.max_concurrent_users
-        )
+
+        # Browser modes need lower concurrency to avoid overwhelming the site
+        max_concurrent = self.config.simulation.max_concurrent_users
+        if self.mode in (SimulationMode.BROWSER_ONLY, SimulationMode.HYBRID):
+            max_concurrent = min(max_concurrent, 10)  # Cap browser concurrency
+
+        self._semaphore = asyncio.Semaphore(max_concurrent)
 
         if self.mode == SimulationMode.MP_ONLY:
             await self._simulate_mp_only(num_users, debug, progress_callback)
@@ -92,11 +96,19 @@ class UserSimulator:
     ) -> None:
         """Simulate users using Measurement Protocol only."""
         async with MeasurementProtocolClient(self.config.ga4, debug=debug) as mp_client:
-            tasks = [
-                self._create_mp_user(mp_client, i, num_users, progress_callback)
-                for i in range(num_users)
-            ]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            # Process in batches for better memory management
+            batch_size = 100
+            for batch_start in range(0, num_users, batch_size):
+                batch_end = min(batch_start + batch_size, num_users)
+                tasks = [
+                    self._create_mp_user(mp_client, i, num_users, progress_callback)
+                    for i in range(batch_start, batch_end)
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                # Log any exceptions that weren't handled
+                for r in results:
+                    if isinstance(r, Exception):
+                        pass  # Already counted in _create_mp_user
 
     async def _create_mp_user(
         self,
@@ -160,11 +172,19 @@ class UserSimulator:
         async with BrowserSessionManager(
             self.config.simulation, self.config.ga4.measurement_id
         ) as browser_mgr:
-            tasks = [
-                self._create_browser_user(browser_mgr, i, num_users, progress_callback)
-                for i in range(num_users)
-            ]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            # Process in batches to avoid overwhelming the site
+            batch_size = 10
+            for batch_start in range(0, num_users, batch_size):
+                batch_end = min(batch_start + batch_size, num_users)
+                tasks = [
+                    self._create_browser_user(browser_mgr, i, num_users, progress_callback)
+                    for i in range(batch_start, batch_end)
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                # Log any exceptions that weren't handled
+                for r in results:
+                    if isinstance(r, Exception):
+                        pass  # Already counted in _create_browser_user
 
     async def _create_browser_user(
         self,
@@ -207,13 +227,21 @@ class UserSimulator:
             async with MeasurementProtocolClient(
                 self.config.ga4, debug=debug
             ) as mp_client:
-                tasks = [
-                    self._create_hybrid_user(
-                        browser_mgr, mp_client, i, num_users, progress_callback
-                    )
-                    for i in range(num_users)
-                ]
-                await asyncio.gather(*tasks, return_exceptions=True)
+                # Process in batches to avoid overwhelming the site
+                batch_size = 10
+                for batch_start in range(0, num_users, batch_size):
+                    batch_end = min(batch_start + batch_size, num_users)
+                    tasks = [
+                        self._create_hybrid_user(
+                            browser_mgr, mp_client, i, num_users, progress_callback
+                        )
+                        for i in range(batch_start, batch_end)
+                    ]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    # Log any exceptions that weren't handled
+                    for r in results:
+                        if isinstance(r, Exception):
+                            pass  # Already counted in _create_hybrid_user
 
     async def _create_hybrid_user(
         self,
